@@ -16,8 +16,8 @@ JSON_FILE    = os.getenv("GOOGLE_JSON_FILE")
 SHEET_ID     = os.getenv("SHEET_ID")
 DATA_FILE    = "data.json"
 
-# 填入你要監聽的分類 ID（可以填多個）
-ALLOWED_CATEGORIES = [123456789012345678]  # ← 改成你 Discord server 裡的分類 ID
+# 從 .env 讀取分類 ID，多個用逗號分隔，例如：ALLOWED_CATEGORIES=123456789,987654321
+ALLOWED_CATEGORIES = [int(i.strip()) for i in os.getenv("ALLOWED_CATEGORIES", "").split(",") if i.strip()]
 
 # bot 啟動後自動填入，不需要手動維護
 ALLOWED_CHANNELS: set = set()
@@ -327,7 +327,7 @@ def parse_order(text: str) -> tuple:
 # 核心：把一則訊息內容轉成訂單 rows
 # =========================
 def process_order_content(message_id, author, content: str, cid: int,
-                           order_id: int, existing_rows: list = None) -> list:
+                           order_id: int, existing_rows: list = None, is_edit: bool = False) -> list:
     """
     解析訊息內容，回傳 rows list。
     existing_rows：若有舊資料（編輯/歷史），保留 "✏ 已編輯"、"資料遭刪除" 狀態。
@@ -395,7 +395,7 @@ def process_order_content(message_id, author, content: str, cid: int,
             r["狀態"] = (existing + " ； 總金額錯誤/寫錯").lstrip(" ； ") if existing else "總金額錯誤/寫錯"
 
     # 編輯模式：正常的 row 標記已編輯
-    if existing_rows:
+    if is_edit:
         for r in rows:
             if not r.get("狀態"):
                 r["狀態"] = "✏ 已編輯"
@@ -525,7 +525,7 @@ async def on_message_edit(before, after):
 
     rows = process_order_content(
         after.id, after.author, after.content, cid,
-        order_id, existing_rows=channel_orders[cid][after.id]
+        order_id, existing_rows=channel_orders[cid][after.id], is_edit=True
     )
     if not rows:
         return

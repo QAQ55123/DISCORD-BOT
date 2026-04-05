@@ -235,7 +235,7 @@ async def delayed_update(cid: int, cname: str):
         return
     update_pending[cid] = True
     await asyncio.sleep(1.5)
-    rebuild_sheet(cid, cname)
+    await asyncio.get_event_loop().run_in_executor(None, rebuild_sheet, cid, cname)
     update_pending[cid] = False
 
 # =========================
@@ -462,7 +462,7 @@ async def load_history():
                 order_counter[cid] += 1
 
         cat_name = channel.category.name if channel.category else "無分類"
-        rebuild_sheet(cid, f"{cat_name}-{channel.name}")
+        await asyncio.get_event_loop().run_in_executor(None, rebuild_sheet, cid, f"{cat_name}-{channel.name}")
 
     print("✅ 歷史讀取完成")
 
@@ -498,7 +498,7 @@ async def auto_rebuild_loop():
                 cat_name = channel.category.name if channel.category else "無分類"
                 cname = f"{cat_name}-{channel.name}"
                 try:
-                    rebuild_sheet(cid, cname)
+                    await asyncio.get_event_loop().run_in_executor(None, rebuild_sheet, cid, cname)
                     print(f"🔄 定時重建：{cname}")
                 except Exception as e:
                     print(f"❌ auto_rebuild 錯誤 ({cname}): {e}")

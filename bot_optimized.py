@@ -169,13 +169,27 @@ def rebuild_sheet(cid: int, cname: str):
             status = str(r.get("狀態", ""))
             if "錯誤" in status or status == "資料遭刪除":
                 continue
-            key = (r.get("商品"), str(r.get("款式", "")).strip())
+            name = r.get("商品")
+            style = str(r.get("款式", "")).strip()
+            # 直接用實際款式當 key（多人商品會依填入的款式分別統計）
+            key = (name, style)
             count[key] = count.get(key, 0) + r.get("商品數量", 0)
 
     data.append(["商品", "款式", "價格", "已訂購"])
     for (n, s), p in price_maps.get(cid, {}).items():
-        qty = count.get((n, str(s if s else "無").strip()), 0)
-        data.append([n, s if s else "無", p, qty])
+        if s == "多人":
+            # 展開所有有人填過的款式，各自一行
+            sub_styles = sorted({style for (name, style) in count if name == n})
+            if sub_styles:
+                for style in sub_styles:
+                    qty = count.get((n, style), 0)
+                    data.append([n, style, p, qty])
+            else:
+                data.append([n, "多人", p, 0])
+        else:
+            lookup_key = (n, str(s if s else "無").strip())
+            qty = count.get(lookup_key, 0)
+            data.append([n, s if s else "無", p, qty])
     data.append([])
 
     # 訂單明細

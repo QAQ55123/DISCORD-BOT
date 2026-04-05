@@ -485,6 +485,23 @@ async def on_ready():
     load_data()
     save_data()
     await load_history()
+    client.loop.create_task(auto_rebuild_loop())
+
+
+async def auto_rebuild_loop():
+    await client.wait_until_ready()
+    while not client.is_closed():
+        await asyncio.sleep(300)  # 每 5 分鐘執行一次
+        for cid in ALLOWED_CHANNELS:
+            channel = client.get_channel(cid)
+            if channel:
+                cat_name = channel.category.name if channel.category else "無分類"
+                cname = f"{cat_name}-{channel.name}"
+                try:
+                    rebuild_sheet(cid, cname)
+                    print(f"🔄 定時重建：{cname}")
+                except Exception as e:
+                    print(f"❌ auto_rebuild 錯誤 ({cname}): {e}")
 
 
 @client.event

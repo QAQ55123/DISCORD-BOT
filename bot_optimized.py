@@ -17,12 +17,9 @@ SHEET_ID     = os.getenv("SHEET_ID")
 DATA_FILE    = "data.json"
 
 # 填入你要監聽的分類 ID（可以填多個）
-ALLOWED_CATEGORIES = [1487773470208163840, #原神
-                      1487773533021929523, #崩鐵
-                      1487774044425162882  #韓國小卡
-                      ]  # ← 改成你 Discord server 裡的分類 ID
-# bot 啟動後自動填入，不需要手動維護
+ALLOWED_CATEGORIES = [123456789012345678]  # ← 改成你 Discord server 裡的分類 ID
 
+# bot 啟動後自動填入，不需要手動維護
 ALLOWED_CHANNELS: set = set()
 
 # 允許的欄位白名單（寫在這裡統一管理）
@@ -234,7 +231,10 @@ def parse_price_list(text: str) -> dict:
         if not m:
             continue
         name, styles, price = m.group(1).strip(), m.group(2), int(m.group(3))
-        if styles:
+        if styles and styles.strip() == "多人":
+            # 多人商品：款式自由填寫，用特殊 key 標記
+            result[(name, "多人")] = price
+        elif styles:
             for s in re.split(r"[/／]", styles):
                 result[(name.strip(), s.strip())] = price
         else:
@@ -254,6 +254,10 @@ def resolve_product(raw: str, price_map: dict) -> tuple:
     name = max(candidates, key=lambda x: len(x[0]))[0]
     remain = raw[len(name):]
     remain = re.sub(r"\d+", "", remain).replace("(", "").replace(")", "").strip()
+
+    # 多人商品：直接回傳使用者填的款式內容
+    if (name, "多人") in price_map:
+        return name, remain or None
 
     styles = [s for (n, s) in price_map if n == name and s]
     if not styles:
@@ -352,10 +356,17 @@ def process_order_content(message_id, author, content: str, cid: int,
         price = price_maps[cid].get((name, style)) if name else None
 
         # 判斷錯誤類型
+        is_multi = (name, "多人") in price_maps[cid] if name else False
+        price = price_maps[cid].get((name, "多人")) if is_multi else price
+
         if not name:
             status = "數量/金額錯誤"
             name, style, price = "輸入錯誤", "款式錯誤", 0
-        elif style is None and any(s for (n, s) in price_maps[cid] if n == name and s):
+        elif is_multi and not style:
+            # 多人商品但沒填款式
+            status = "未選擇款式"
+            price = price or 0
+        elif not is_multi and style is None and any(s for (n, s) in price_maps[cid] if n == name and s):
             status = "數量/金額錯誤"
             style, price = "款式錯誤", 0
         elif qty <= 0:
@@ -382,6 +393,12 @@ def process_order_content(message_id, author, content: str, cid: int,
         for r in rows:
             existing = r.get("狀態", "")
             r["狀態"] = (existing + " ； 總金額錯誤/寫錯").lstrip(" ； ") if existing else "總金額錯誤/寫錯"
+
+    # 編輯模式：正常的 row 標記已編輯
+    if existing_rows:
+        for r in rows:
+            if not r.get("狀態"):
+                r["狀態"] = "✏ 已編輯"
 
     if not rows:
         rows = [make_row(order_id, message_id, author,
@@ -512,11 +529,6 @@ async def on_message_edit(before, after):
     )
     if not rows:
         return
-
-    # 標記已編輯
-    for r in rows:
-        if not r.get("狀態"):
-            r["狀態"] = "✏ 已編輯"
 
     channel_orders[cid][after.id] = rows
     save_data()

@@ -138,12 +138,16 @@ def load_data():
 # Google Sheets
 # =========================
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_name(JSON_FILE, scope)
-gs = gspread.authorize(creds)
-spreadsheet = gs.open_by_key(SHEET_ID)
+
+
+def get_spreadsheet():
+    creds = ServiceAccountCredentials.from_json_keyfile_name(JSON_FILE, scope)
+    gs = gspread.authorize(creds)
+    return gs.open_by_key(SHEET_ID)
 
 
 def get_sheet(name: str):
+    spreadsheet = get_spreadsheet()
     try:
         sheet = spreadsheet.worksheet(name)
         sheet.clear()

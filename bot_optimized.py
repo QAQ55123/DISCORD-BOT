@@ -492,7 +492,15 @@ async def auto_rebuild_loop():
     await client.wait_until_ready()
     while not client.is_closed():
         await asyncio.sleep(300)  # 每 5 分鐘執行一次
-        for cid in ALLOWED_CHANNELS:
+
+        # 重新掃描，更新 ALLOWED_CHANNELS（處理頻道移類別的情況）
+        ALLOWED_CHANNELS.clear()
+        for guild in client.guilds:
+            for channel in guild.text_channels:
+                if channel.category and channel.category.id in ALLOWED_CATEGORIES:
+                    ALLOWED_CHANNELS.add(channel.id)
+
+        for cid in list(ALLOWED_CHANNELS):
             channel = client.get_channel(cid)
             if channel:
                 cat_name = channel.category.name if channel.category else "無分類"

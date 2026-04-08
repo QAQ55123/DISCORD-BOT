@@ -491,25 +491,30 @@ async def on_ready():
 async def auto_rebuild_loop():
     await client.wait_until_ready()
     while not client.is_closed():
-        await asyncio.sleep(300)  # 每 5 分鐘執行一次
+        try:
+            await asyncio.sleep(300)  # 每 5 分鐘執行一次
 
-        # 重新掃描，更新 ALLOWED_CHANNELS（處理頻道移類別的情況）
-        ALLOWED_CHANNELS.clear()
-        for guild in client.guilds:
-            for channel in guild.text_channels:
-                if channel.category and channel.category.id in ALLOWED_CATEGORIES:
-                    ALLOWED_CHANNELS.add(channel.id)
+            # 重新掃描，更新 ALLOWED_CHANNELS（處理頻道移類別的情況）
+            ALLOWED_CHANNELS.clear()
+            for guild in client.guilds:
+                for channel in guild.text_channels:
+                    if channel.category and channel.category.id in ALLOWED_CATEGORIES:
+                        ALLOWED_CHANNELS.add(channel.id)
 
-        for cid in list(ALLOWED_CHANNELS):
-            channel = client.get_channel(cid)
-            if channel:
-                cat_name = channel.category.name if channel.category else "無分類"
-                cname = f"{cat_name}-{channel.name}"
-                try:
-                    await asyncio.get_event_loop().run_in_executor(None, rebuild_sheet, cid, cname)
-                    print(f"🔄 定時重建：{cname}")
-                except Exception as e:
-                    print(f"❌ auto_rebuild 錯誤 ({cname}): {e}")
+            for cid in list(ALLOWED_CHANNELS):
+                channel = client.get_channel(cid)
+                if channel:
+                    cat_name = channel.category.name if channel.category else "無分類"
+                    cname = f"{cat_name}-{channel.name}"
+                    try:
+                        await asyncio.get_event_loop().run_in_executor(None, rebuild_sheet, cid, cname)
+                        print(f"🔄 定時重建：{cname}")
+                    except Exception as e:
+                        print(f"❌ auto_rebuild 錯誤 ({cname}): {e}")
+
+        except Exception as e:
+            print(f"❌ auto_rebuild_loop 意外錯誤: {e}")
+            await asyncio.sleep(60)  # 出錯後等 1 分鐘再繼續
 
 
 @client.event

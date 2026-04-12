@@ -281,7 +281,8 @@ def resolve_product(raw: str, price_map: dict) -> tuple:
     if not styles:
         return name, None
 
-    for s in styles:
+    # 長的款式優先比對，避免「星」比「星期日」先命中
+    for s in sorted(styles, key=len, reverse=True):
         if remain == s or s in remain:
             return name, s
 

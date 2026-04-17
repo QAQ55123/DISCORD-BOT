@@ -245,10 +245,16 @@ def parse_price_list(text: str) -> dict:
     result = {}
     for line in text.split("\n"):
         line = re.sub(r"^\d+\.", "", line.strip())
-        m = re.search(r"(.+?)(?:\((.*?)\))?[:：](\d+)", line)
+        # 正規化全形括號為半形
+        line = line.replace("（", "(").replace("）", ")")
+        # 移除 +說明文字（如 +紙袋），避免干擾名稱解析
+        line = re.sub(r"[+＋][^(:：)]+(?=\s*[:：(])", "", line)
+        # 商品名稱（括號前）、款式（括號內）、價格（支援「元」字）
+        m = re.search(r"^(.+?)\s*(?:\(([^)]+)\))?\s*[:：]\s*(\d+)", line)
         if not m:
             continue
-        name, styles, price = m.group(1).strip(), m.group(2), int(m.group(3))
+        name = m.group(1).strip()
+        styles, price = m.group(2), int(m.group(3))
         if styles and styles.strip() == "多人":
             # 多人商品：款式自由填寫，用特殊 key 標記
             result[(name, "多人")] = price
@@ -263,19 +269,29 @@ def parse_price_list(text: str) -> dict:
 # 解析：商品名稱 + 款式
 # =========================
 def resolve_product(raw: str, price_map: dict) -> tuple:
-    raw = unicodedata.normalize("NFKC", raw).strip().replace(" ", "")
+    raw = unicodedata.normalize("NFKC", raw).strip()
+    # 正規化全形括號、空格
+    raw = raw.replace("（", "(").replace("）", ")").replace(" ", "")
 
-    candidates = [(n, s) for (n, s) in price_map if raw.startswith(str(n).strip())]
+    candidates = [(n, s) for (n, s) in price_map if raw.startswith(str(n).strip().replace(" ", ""))]
     if not candidates:
         return None, None
 
     name = max(candidates, key=lambda x: len(x[0]))[0]
-    remain = raw[len(name):]
-    remain = re.sub(r"\d+", "", remain).replace("(", "").replace(")", "").strip()
+    remain = raw[len(name.replace(" ", "")):]
+    remain_clean = re.sub(r"\d+", "", remain)
+    # 優先取括號內的款式
+    bracket = re.search(r"[\(（]([^)）]+)[\)）]", remain_clean)
+    if bracket:
+        remain_clean = bracket.group(1).strip()
+    else:
+        # 支援連字號分隔款式（如「徽章組-景元」）
+        remain_clean = re.sub(r"^[-－]", "", remain_clean)
+        remain_clean = remain_clean.replace("(", "").replace(")", "").strip()
 
     # 多人商品：直接回傳使用者填的款式內容
     if (name, "多人") in price_map:
-        return name, remain or None
+        return name, remain_clean or None
 
     styles = [s for (n, s) in price_map if n == name and s]
     if not styles:
@@ -283,7 +299,7 @@ def resolve_product(raw: str, price_map: dict) -> tuple:
 
     # 長的款式優先比對，避免「星」比「星期日」先命中
     for s in sorted(styles, key=len, reverse=True):
-        if remain == s or s in remain:
+        if remain_clean == s or s in remain_clean:
             return name, s
 
     return name, None
@@ -300,10 +316,12 @@ def parse_order(text: str) -> tuple:
     items = []
     extra = {}
 
-    # 商品欄
-    m = re.search(r"(?:商品|商品名稱)[:：]\s*(.+)", text)
+    # 商品欄（支援多行：抓到下一個「欄位:」或結尾為止）
+    m = re.search(r"(?:商品|商品名稱)[:：]\s*(.+?)(?=\n\S+[:：]|\Z)", text, re.DOTALL)
     if m:
-        for it in re.split(r"[+,，、]", m.group(1)):
+        # 把多行合併，用 + 分隔後統一拆分
+        block = m.group(1).replace("\n", "+")
+        for it in re.split(r"[+,，、]", block):
             it = it.strip()
             if not it:
                 continue

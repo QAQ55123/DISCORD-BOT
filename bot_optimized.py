@@ -5,6 +5,14 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from dotenv import load_dotenv
 import os
+try:
+    import opencc
+    _cc = opencc.OpenCC('s2twp')  # 簡體轉繁體（台灣用字）
+    def to_traditional(text: str) -> str:
+        return _cc.convert(text)
+except ImportError:
+    def to_traditional(text: str) -> str:
+        return text  # 沒安裝就原樣回傳
 
 load_dotenv()
 
@@ -272,6 +280,8 @@ def parse_price_list(text: str) -> dict:
 # =========================
 def resolve_product(raw: str, price_map: dict) -> tuple:
     raw = unicodedata.normalize("NFKC", raw).strip()
+    # 簡體轉繁體
+    raw = to_traditional(raw)
     # 正規化全形括號、空格
     raw = raw.replace("（", "(").replace("）", ")").replace(" ", "")
 

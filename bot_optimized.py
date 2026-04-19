@@ -488,12 +488,26 @@ async def load_history():
             if not price_maps[cid]:
                 continue
 
-            # 保留舊有資料的特殊狀態
-            existing = channel_orders[cid].get(message.id)
+            # 強制重新解析，只保留特殊狀態（資料遭刪除、✏ 已編輯）
+            old_rows = channel_orders[cid].get(message.id)
+            special_status = {}
+            if old_rows:
+                for r in old_rows:
+                    s = r.get("狀態", "")
+                    if s in {"資料遭刪除", "✏ 已編輯"}:
+                        special_status[(r.get("商品"), r.get("款式"))] = s
+
             rows = process_order_content(
                 message.id, message.author, content, cid,
-                order_counter[cid], existing_rows=existing
+                order_counter[cid]
             )
+
+            # 套回特殊狀態
+            if rows and special_status:
+                for r in rows:
+                    key = (r.get("商品"), r.get("款式"))
+                    if key in special_status:
+                        r["狀態"] = special_status[key]
 
             if rows:
                 channel_orders[cid][message.id] = rows

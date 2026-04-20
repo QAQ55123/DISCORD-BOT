@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 import os
 try:
     import opencc
-    _cc = opencc.OpenCC('s2twp')
+    _cc = opencc.OpenCC('s2t')  # 只轉簡體字，不做台灣用詞替換（避免「文件」→「檔案」）
     def to_traditional(text: str) -> str:
         return _cc.convert(text)
 except ImportError:

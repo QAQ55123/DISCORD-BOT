@@ -5,14 +5,6 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from dotenv import load_dotenv
 import os
-try:
-    import opencc
-    _cc = opencc.OpenCC('s2twp')  # 簡體轉繁體（台灣用字）
-    def to_traditional(text: str) -> str:
-        return _cc.convert(text)
-except ImportError:
-    def to_traditional(text: str) -> str:
-        return text  # 沒安裝就原樣回傳
 
 load_dotenv()
 
@@ -146,16 +138,12 @@ def load_data():
 # Google Sheets
 # =========================
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-
-
-def get_spreadsheet():
-    creds = ServiceAccountCredentials.from_json_keyfile_name(JSON_FILE, scope)
-    gs = gspread.authorize(creds)
-    return gs.open_by_key(SHEET_ID)
+creds = ServiceAccountCredentials.from_json_keyfile_name(JSON_FILE, scope)
+gs = gspread.authorize(creds)
+spreadsheet = gs.open_by_key(SHEET_ID)
 
 
 def get_sheet(name: str):
-    spreadsheet = get_spreadsheet()
     try:
         sheet = spreadsheet.worksheet(name)
         sheet.clear()
@@ -181,27 +169,13 @@ def rebuild_sheet(cid: int, cname: str):
             status = str(r.get("狀態", ""))
             if "錯誤" in status or status == "資料遭刪除":
                 continue
-            name = r.get("商品")
-            style = str(r.get("款式", "")).strip()
-            # 直接用實際款式當 key（多人商品會依填入的款式分別統計）
-            key = (name, style)
+            key = (r.get("商品"), str(r.get("款式", "")).strip())
             count[key] = count.get(key, 0) + r.get("商品數量", 0)
 
     data.append(["商品", "款式", "價格", "已訂購"])
     for (n, s), p in price_maps.get(cid, {}).items():
-        if s == "多人":
-            # 展開所有有人填過的款式，各自一行
-            sub_styles = sorted({style for (name, style) in count if name == n})
-            if sub_styles:
-                for style in sub_styles:
-                    qty = count.get((n, style), 0)
-                    data.append([n, style, p, qty])
-            else:
-                data.append([n, "多人", p, 0])
-        else:
-            lookup_key = (n, str(s if s else "無").strip())
-            qty = count.get(lookup_key, 0)
-            data.append([n, s if s else "無", p, qty])
+        qty = count.get((n, str(s if s else "無").strip()), 0)
+        data.append([n, s if s else "無", p, qty])
     data.append([])
 
     # 訂單明細
@@ -243,7 +217,7 @@ async def delayed_update(cid: int, cname: str):
         return
     update_pending[cid] = True
     await asyncio.sleep(1.5)
-    await asyncio.get_event_loop().run_in_executor(None, rebuild_sheet, cid, cname)
+    rebuild_sheet(cid, cname)
     update_pending[cid] = False
 
 # =========================
@@ -253,18 +227,10 @@ def parse_price_list(text: str) -> dict:
     result = {}
     for line in text.split("\n"):
         line = re.sub(r"^\d+\.", "", line.strip())
-        # 正規化全形括號為半形
-        line = line.replace("（", "(").replace("）", ")")
-        # 移除金額後面的括號說明（如 295/1(隨機壓克力杯墊及小卡)）
-        line = re.sub(r"(\d+)[^:：]*\([^)]+\)\s*$", r"\1", line)
-        # 移除 +說明文字（如 +紙袋），避免干擾名稱解析
-        line = re.sub(r"[+＋][^(:：)]+(?=\s*[:：(])", "", line)
-        # 商品名稱（括號前）、款式（括號內）、價格（支援「元」字）
-        m = re.search(r"^(.+?)\s*(?:\(([^)]+)\))?\s*[:：]\s*(\d+)", line)
+        m = re.search(r"(.+?)(?:\((.*?)\))?[:：](\d+)", line)
         if not m:
             continue
-        name = m.group(1).strip()
-        styles, price = m.group(2), int(m.group(3))
+        name, styles, price = m.group(1).strip(), m.group(2), int(m.group(3))
         if styles and styles.strip() == "多人":
             # 多人商品：款式自由填寫，用特殊 key 標記
             result[(name, "多人")] = price
@@ -279,39 +245,26 @@ def parse_price_list(text: str) -> dict:
 # 解析：商品名稱 + 款式
 # =========================
 def resolve_product(raw: str, price_map: dict) -> tuple:
-    raw = unicodedata.normalize("NFKC", raw).strip()
-    # 簡體轉繁體
-    raw = to_traditional(raw)
-    # 正規化全形括號、空格
-    raw = raw.replace("（", "(").replace("）", ")").replace(" ", "")
+    raw = unicodedata.normalize("NFKC", raw).strip().replace(" ", "")
 
-    candidates = [(n, s) for (n, s) in price_map if raw.startswith(str(n).strip().replace(" ", ""))]
+    candidates = [(n, s) for (n, s) in price_map if raw.startswith(str(n).strip())]
     if not candidates:
         return None, None
 
     name = max(candidates, key=lambda x: len(x[0]))[0]
-    remain = raw[len(name.replace(" ", "")):]
-    remain_clean = re.sub(r"\d+", "", remain)
-    # 優先取括號內的款式
-    bracket = re.search(r"[\(（]([^)）]+)[\)）]", remain_clean)
-    if bracket:
-        remain_clean = bracket.group(1).strip()
-    else:
-        # 支援連字號分隔款式（如「徽章組-景元」）
-        remain_clean = re.sub(r"^[-－]", "", remain_clean)
-        remain_clean = remain_clean.replace("(", "").replace(")", "").strip()
+    remain = raw[len(name):]
+    remain = re.sub(r"\d+", "", remain).replace("(", "").replace(")", "").strip()
 
     # 多人商品：直接回傳使用者填的款式內容
     if (name, "多人") in price_map:
-        return name, remain_clean or None
+        return name, remain or None
 
     styles = [s for (n, s) in price_map if n == name and s]
     if not styles:
         return name, None
 
-    # 長的款式優先比對，避免「星」比「星期日」先命中
-    for s in sorted(styles, key=len, reverse=True):
-        if remain_clean == s or s in remain_clean:
+    for s in styles:
+        if remain == s or s in remain:
             return name, s
 
     return name, None
@@ -328,25 +281,19 @@ def parse_order(text: str) -> tuple:
     items = []
     extra = {}
 
-    # 商品欄（支援多行：抓到下一個「欄位:」或結尾為止）
-    m = re.search(r"(?:商品|商品名稱)[:：]\s*(.+?)(?=\n\S+[:：]|\Z)", text, re.DOTALL)
+    # 商品欄
+    m = re.search(r"(?:商品|商品名稱)[:：]\s*(.+)", text)
     if m:
-        # 把多行合併，用 + 分隔後統一拆分
-        block = m.group(1).replace("\n", "+")
-        for it in re.split(r"[+,，、]", block):
+        for it in re.split(r"[+,，、]", m.group(1)):
             it = it.strip()
             if not it:
                 continue
 
+            # 移除括號前的空格（如「立牌文件組 (景元)6」→「立牌文件組(景元)6」）
+            it = re.sub(r"\s+(?=[\(（])", "", it)
+
             base_match = re.match(r"^[A-Za-z]+", it)
             base_name  = base_match.group(0) if base_match else ""
-
-            # 連字號格式：中文商品名-款式數量（如「徽章組-景元1」），直接當單一商品處理
-            if re.match(r"[\u4e00-\u9fff].*[-－]", it):
-                it_clean = re.sub(r"[-－]", " ", it)
-                q = re.search(r"(\d+)$", it_clean)
-                items.append((it_clean[:q.start()].strip(), int(q.group(1))) if q else (it_clean.strip(), 0))
-                continue
 
             # 支援「款式+數量」多組（如 A1B2、左3右4）
             pairs = re.findall(r"([A-Za-z\u4e00-\u9fff]+?)(\d+)", it)
@@ -357,7 +304,7 @@ def parse_order(text: str) -> tuple:
                 continue
 
             # 單一商品
-            it = re.sub(r"[*xX×]", " ", it)
+            it = re.sub(r"[*xX×\-]", " ", it)
             q = re.search(r"(\d+)$", it)
             items.append((it[:q.start()].strip(), int(q.group(1))) if q else (it.strip(), 0))
 
@@ -488,33 +435,19 @@ async def load_history():
             if not price_maps[cid]:
                 continue
 
-            # 強制重新解析，只保留特殊狀態（資料遭刪除、✏ 已編輯）
-            old_rows = channel_orders[cid].get(message.id)
-            special_status = {}
-            if old_rows:
-                for r in old_rows:
-                    s = r.get("狀態", "")
-                    if s in {"資料遭刪除", "✏ 已編輯"}:
-                        special_status[(r.get("商品"), r.get("款式"))] = s
-
+            # 保留舊有資料的特殊狀態
+            existing = channel_orders[cid].get(message.id)
             rows = process_order_content(
                 message.id, message.author, content, cid,
-                order_counter[cid]
+                order_counter[cid], existing_rows=existing
             )
-
-            # 套回特殊狀態
-            if rows and special_status:
-                for r in rows:
-                    key = (r.get("商品"), r.get("款式"))
-                    if key in special_status:
-                        r["狀態"] = special_status[key]
 
             if rows:
                 channel_orders[cid][message.id] = rows
                 order_counter[cid] += 1
 
         cat_name = channel.category.name if channel.category else "無分類"
-        await asyncio.get_event_loop().run_in_executor(None, rebuild_sheet, cid, f"{cat_name}-{channel.name}")
+        rebuild_sheet(cid, f"{cat_name}-{channel.name}")
 
     print("✅ 歷史讀取完成")
 
@@ -537,36 +470,6 @@ async def on_ready():
     load_data()
     save_data()
     await load_history()
-    client.loop.create_task(auto_rebuild_loop())
-
-
-async def auto_rebuild_loop():
-    await client.wait_until_ready()
-    while not client.is_closed():
-        try:
-            await asyncio.sleep(300)  # 每 5 分鐘執行一次
-
-            # 重新掃描，更新 ALLOWED_CHANNELS（處理頻道移類別的情況）
-            ALLOWED_CHANNELS.clear()
-            for guild in client.guilds:
-                for channel in guild.text_channels:
-                    if channel.category and channel.category.id in ALLOWED_CATEGORIES:
-                        ALLOWED_CHANNELS.add(channel.id)
-
-            for cid in list(ALLOWED_CHANNELS):
-                channel = client.get_channel(cid)
-                if channel:
-                    cat_name = channel.category.name if channel.category else "無分類"
-                    cname = f"{cat_name}-{channel.name}"
-                    try:
-                        await asyncio.get_event_loop().run_in_executor(None, rebuild_sheet, cid, cname)
-                        print(f"🔄 定時重建：{cname}")
-                    except Exception as e:
-                        print(f"❌ auto_rebuild 錯誤 ({cname}): {e}")
-
-        except Exception as e:
-            print(f"❌ auto_rebuild_loop 意外錯誤: {e}")
-            await asyncio.sleep(60)  # 出錯後等 1 分鐘再繼續
 
 
 @client.event

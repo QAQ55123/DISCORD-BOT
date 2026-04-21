@@ -606,6 +606,31 @@ async def on_message_edit(before, after):
     cat_name = after.channel.category.name if after.channel.category else "無分類"
     cname = f"{cat_name}-{after.channel.name}"
 
+    # 價格表編輯：重新解析價格表，並重新抓歷史訊息解析所有訂單
+    if re.match(r"^價格表", after.content):
+        now = after.edited_at.timestamp() if after.edited_at else after.created_at.timestamp()
+        price_update_time[cid] = now
+        price_maps[cid] = parse_price_list(after.content)
+        # 重新抓歷史訊息，重新解析所有訂單
+        channel_orders[cid] = {}
+        order_counter[cid] = 1
+        channel = after.channel
+        async for message in channel.history(limit=200, oldest_first=True):
+            if message.author.bot:
+                continue
+            if re.match(r"^價格表", message.content):
+                continue
+            rows = process_order_content(
+                message.id, message.author, message.content, cid, order_counter[cid]
+            )
+            if rows:
+                channel_orders[cid][message.id] = rows
+                order_counter[cid] += 1
+        save_data()
+        await delayed_update(cid, cname)
+        print(f"✅ 價格表已編輯，重新解析頻道：{cname}")
+        return
+
     if cid not in channel_orders or after.id not in channel_orders[cid]:
         return
 

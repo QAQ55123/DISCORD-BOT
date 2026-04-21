@@ -453,11 +453,12 @@ def process_order_content(message_id, author, content: str, cid: int,
 
         rows.append(row)
 
-    # 金額總驗
+    # 金額總驗：只有所有商品都正確時才驗總金額
     if total and total != calc:
-        for r in rows:
-            existing = r.get("狀態", "")
-            r["狀態"] = (existing + " ； 總金額錯誤/寫錯").lstrip(" ； ") if existing else "總金額錯誤/寫錯"
+        has_error = any(r.get("狀態") for r in rows)
+        if not has_error:
+            for r in rows:
+                r["狀態"] = "總金額錯誤/寫錯"
 
     # 編輯模式：正常的 row 標記已編輯
     if is_edit:

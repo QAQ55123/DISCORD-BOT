@@ -49,6 +49,7 @@ channel_orders    = {}  # {cid: {mid: [row, ...]}}
 price_update_time = {}  # {cid: timestamp}
 order_counter     = {}  # {cid: int}
 update_pending    = {}  # {cid: bool}
+error_notices     = {}  # {order_mid: notice_message}
 
 # =========================
 # 工具函式
@@ -90,6 +91,20 @@ def make_row(order_id, message_id, author, name, style, qty, price, status, extr
         **extra,
     }
     return clean_row(row)
+
+def build_error_message(author, rows: list) -> str:
+    """根據 rows 建立錯誤提醒訊息"""
+    lines = [f"{author.mention} 您的訂單有以下問題，請編輯後重試："]
+    for r in rows:
+        status = r.get("狀態", "")
+        if not status:
+            continue
+        name = r.get("商品", "")
+        style = r.get("款式", "")
+        style_str = f"（{style}）" if style and style != "無" else ""
+        lines.append(f"• {name}{style_str}：{status}")
+    return "\n".join(lines)
+
 
 # =========================
 # 儲存 / 載入
@@ -607,6 +622,12 @@ async def on_message(message):
     save_data()
     await delayed_update(cid, cname)
 
+    # 若有錯誤，發提醒訊息
+    error_rows = [r for r in rows if r.get("狀態")]
+    if error_rows:
+        notice = await message.channel.send(build_error_message(message.author, error_rows))
+        error_notices[message.id] = notice
+
 
 @client.event
 async def on_message_edit(before, after):
@@ -659,6 +680,28 @@ async def on_message_edit(before, after):
     save_data()
     await delayed_update(cid, cname)
 
+    # 更新或刪除提醒訊息
+    error_rows = [r for r in rows if r.get("狀態")]
+    if error_rows:
+        msg_text = build_error_message(after.author, error_rows)
+        if after.id in error_notices:
+            try:
+                await error_notices[after.id].edit(content=msg_text)
+            except Exception:
+                notice = await after.channel.send(msg_text)
+                error_notices[after.id] = notice
+        else:
+            notice = await after.channel.send(msg_text)
+            error_notices[after.id] = notice
+    else:
+        # 全部正確，刪除提醒訊息
+        if after.id in error_notices:
+            try:
+                await error_notices[after.id].delete()
+            except Exception:
+                pass
+            del error_notices[after.id]
+
 
 @client.event
 async def on_message_delete(message):
@@ -674,6 +717,14 @@ async def on_message_delete(message):
             r["狀態"] = "資料遭刪除"
         save_data()
         await delayed_update(cid, cname)
+
+    # 刪除對應的提醒訊息
+    if message.id in error_notices:
+        try:
+            await error_notices[message.id].delete()
+        except Exception:
+            pass
+        del error_notices[message.id]
 
 
 client.run(TOKEN)

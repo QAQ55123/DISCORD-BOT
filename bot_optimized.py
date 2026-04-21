@@ -92,6 +92,18 @@ def make_row(order_id, message_id, author, name, style, qty, price, status, extr
     }
     return clean_row(row)
 
+async def send_success_and_delete(channel, author, delay: int = 3600):
+    """發送喊單成功訊息，delay 秒後自動刪除"""
+    msg = await channel.send(f"{author.mention} 喊單成功！")
+    async def _delete():
+        await asyncio.sleep(delay)
+        try:
+            await msg.delete()
+        except Exception:
+            pass
+    asyncio.get_event_loop().create_task(_delete())
+
+
 def build_error_message(author, rows: list) -> str:
     """根據 rows 建立錯誤提醒訊息"""
     lines = [f"{author.mention} 您的訂單有以下問題，請編輯後重試："]
@@ -629,7 +641,7 @@ async def on_message(message):
         notice = await message.channel.send(build_error_message(message.author, error_rows))
         error_notices[message.id] = notice
     else:
-        await message.channel.send(f"{message.author.mention} 喊單成功！")
+        await send_success_and_delete(message.channel, message.author)
 
 
 @client.event
@@ -704,7 +716,7 @@ async def on_message_edit(before, after):
             except Exception:
                 pass
             del error_notices[after.id]
-        await after.channel.send(f"{after.author.mention} 喊單成功！")
+        await send_success_and_delete(after.channel, after.author)
 
 
 @client.event

@@ -623,7 +623,7 @@ async def on_message(message):
     await delayed_update(cid, cname)
 
     # 若有錯誤，發提醒訊息
-    error_rows = [r for r in rows if r.get("狀態")]
+    error_rows = [r for r in rows if r.get("狀態") and r.get("狀態") not in {"✏ 已編輯", "資料遭刪除"}]
     if error_rows:
         notice = await message.channel.send(build_error_message(message.author, error_rows))
         error_notices[message.id] = notice
@@ -681,7 +681,7 @@ async def on_message_edit(before, after):
     await delayed_update(cid, cname)
 
     # 更新或刪除提醒訊息
-    error_rows = [r for r in rows if r.get("狀態")]
+    error_rows = [r for r in rows if r.get("狀態") and r.get("狀態") not in {"✏ 已編輯", "資料遭刪除"}]
     if error_rows:
         msg_text = build_error_message(after.author, error_rows)
         if after.id in error_notices:

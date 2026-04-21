@@ -623,11 +623,13 @@ async def on_message(message):
     save_data()
     await delayed_update(cid, cname)
 
-    # 若有錯誤，發提醒訊息
+    # 若有錯誤，發提醒訊息；否則發喊單成功
     error_rows = [r for r in rows if r.get("狀態") and r.get("狀態") not in {"✏ 已編輯", "資料遭刪除"}]
     if error_rows:
         notice = await message.channel.send(build_error_message(message.author, error_rows))
         error_notices[message.id] = notice
+    else:
+        await message.channel.send(f"{message.author.mention} 喊單成功！")
 
 
 @client.event
@@ -695,13 +697,14 @@ async def on_message_edit(before, after):
             notice = await after.channel.send(msg_text)
             error_notices[after.id] = notice
     else:
-        # 全部正確，刪除提醒訊息
+        # 全部正確，刪除提醒訊息並發喊單成功
         if after.id in error_notices:
             try:
                 await error_notices[after.id].delete()
             except Exception:
                 pass
             del error_notices[after.id]
+        await after.channel.send(f"{after.author.mention} 喊單成功！")
 
 
 @client.event

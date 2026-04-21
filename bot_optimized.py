@@ -469,8 +469,12 @@ async def load_history():
         channel_orders.setdefault(cid, {})
         order_counter.setdefault(cid, 1)
 
+        # 記錄這次從 Discord 抓到的訊息 ID
+        seen_ids = set()
+
         async for message in channel.history(limit=200, oldest_first=True):
             content = message.content
+            seen_ids.add(message.id)
 
             if re.match(r"^價格表", content):
                 t = message.created_at.timestamp()
@@ -505,6 +509,13 @@ async def load_history():
             if rows:
                 channel_orders[cid][message.id] = rows
                 order_counter[cid] += 1
+
+        # data.json 有但 Discord 上已不存在的訊息 → 標記為資料遭刪除
+        for mid, rows in channel_orders.get(cid, {}).items():
+            if mid not in seen_ids:
+                for r in rows:
+                    if r.get("狀態") != "資料遭刪除":
+                        r["狀態"] = "資料遭刪除"
 
         cat_name = channel.category.name if channel.category else "無分類"
         await asyncio.get_event_loop().run_in_executor(None, rebuild_sheet, cid, f"{cat_name}-{channel.name}")

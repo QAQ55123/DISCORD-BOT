@@ -621,8 +621,17 @@ async def on_message(message):
             await delayed_update(cid, cname)
         return
 
+    # 價格表是空的，先去歷史訊息找
     if not price_maps[cid]:
-        return
+        async for hist in message.channel.history(limit=200, oldest_first=True):
+            if re.match(r"^\s*價格表", hist.content):
+                t = hist.created_at.timestamp()
+                if t >= price_update_time.get(cid, 0):
+                    price_update_time[cid] = t
+                    price_maps[cid] = parse_price_list(hist.content)
+                break
+        if not price_maps[cid]:
+            return
 
     rows = process_order_content(
         message.id, message.author, content, cid, order_counter[cid]

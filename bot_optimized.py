@@ -393,22 +393,24 @@ def rebuild_sheet(cid: int, cname: str):
                            r.get("狀態") != "資料遭刪除"]
 
             # 建立運費公式：Σ(單件重量×(1+分攤比例)/1000×每公斤價格×數量)
+            # 成本表從 L 欄起，L=商品, M=款式, N=售價, O=進貨單價, P=單件重量, Q=數量, R=小計
+            # 運費計算區：N欄為包裹總重/每公斤價格/商品總重/包材重量/分攤比例
             fee_parts = []
             for idx in user_rows_idx:
                 r = rows[idx]
                 item_name = r.get("商品", "")
                 item_style = r.get("款式", "無")
                 qty = r.get("商品數量", 0)
-                # 在成本表找對應的單件重量
+                # 在成本表找對應的單件重量（P欄）
                 item_row_in_cost = None
                 for j, (n, s) in enumerate(price_map.keys()):
                     s_display = s if s else "無"
                     if n == item_name and s_display == item_style:
-                        item_row_in_cost = 3 + 1 + j  # K欄起始列 + 標題 + index
+                        item_row_in_cost = 3 + 1 + j  # 成本表第3列為標題，商品從第4列開始
                         break
                 if item_row_in_cost:
-                    # 單件重量在 O 欄
-                    fee_parts.append(f"O{item_row_in_cost}*(1+M{ratio_row})/1000*M{price_row}*{qty}")
+                    # P欄=單件重量, N{ratio_row}=每g分攤比例, N{price_row}=每公斤價格
+                    fee_parts.append(f"P{item_row_in_cost}*(1+N{ratio_row})/1000*N{price_row}*{qty}")
 
             if fee_parts:
                 detail_rows[last_idx][-1] = "=" + "+".join(fee_parts)

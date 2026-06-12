@@ -188,46 +188,37 @@ def get_sheet(name: str):
         # 只清除左邊 A~J 欄，保留 K 欄以後的成本表
         # 用空值覆蓋的方式清除 A~J 欄
         empty = [[""] * 10] * 1000
-        sheet.update(values=empty, range_name="A1:J1000")
+        sheet.update(values=empty, range_name="A1:K1000")
         return sheet, False  # False = 已存在
     except gspread.exceptions.WorksheetNotFound:
         sheet = spreadsheet.add_worksheet(title=name, rows="1000", cols="30")
         return sheet, True  # True = 新建立
 
 
-def build_cost_table(sheet, price_map: dict, stats_row_count: int):
-    """第一次建立成本表框架（K欄起）"""
-    items = []
-    for (n, s), p in price_map.items():
-        if s == "多人":
-            items.append((n, "多人", p))
-        else:
-            items.append((n, s if s else "無", p))
-
-    item_count = len(items)
-    start_row = 3  # 成本表從第3列開始
+def build_cost_table(sheet, price_map: dict, item_rows: list):
+    """重新生成成本表（L欄起），item_rows 為實際商品列（含多人展開後的款式）"""
+    item_count = len(item_rows)
+    start_row = 3  # 成本表從第3列開始（對齊統計表）
     cost_data = []
 
     # 標題列
     cost_data.append(["商品", "款式", "售價", "進貨單價", "單件重量(g)", "數量", "小計"])
 
     # 商品列
-    for i, (n, s, p) in enumerate(items):
+    for i, (n, s, p) in enumerate(item_rows):
         row_num = start_row + 1 + i
-        # 數量：用 VLOOKUP 比對商品+款式 引用左邊已訂購
         pipe = "CHAR(124)"
         qty_f = (
-            "=IFERROR(VLOOKUP(K" + str(row_num) +
-            "&" + pipe + "&L" + str(row_num) +
+            "=IFERROR(VLOOKUP(L" + str(row_num) +
+            "&" + pipe + "&M" + str(row_num) +
             ",ARRAYFORMULA(A$4:A$200&" + pipe + "&B$4:B$200),2,0),0)"
         )
-        # 小計 = 進貨單價 × 數量
-        sub_f = "=IF(N" + str(row_num) + '="","",N' + str(row_num) + "*P" + str(row_num) + ")"
+        sub_f = "=IF(O" + str(row_num) + '="","",O' + str(row_num) + "*Q" + str(row_num) + ")"
         cost_data.append([n, s, p, "", "", qty_f, sub_f])
 
     cost_data.append([])
 
-    # 運費計算區
+    # 運費計算區（緊接在商品區下方）
     fee_start = start_row + item_count + 2
     pkg_row = fee_start + 1
     price_row = fee_start + 2
@@ -236,12 +227,12 @@ def build_cost_table(sheet, price_map: dict, stats_row_count: int):
     ratio_row = fee_start + 5
 
     prod_w_f = (
-        "=SUMPRODUCT((O" + str(start_row+1) + ":O" + str(start_row+item_count) +
-        '<>"")*O' + str(start_row+1) + ":O" + str(start_row+item_count) +
-        "*P" + str(start_row+1) + ":P" + str(start_row+item_count) + ")"
+        "=SUMPRODUCT((P" + str(start_row+1) + ":P" + str(start_row+item_count) +
+        '<>"")*P' + str(start_row+1) + ":P" + str(start_row+item_count) +
+        "*Q" + str(start_row+1) + ":Q" + str(start_row+item_count) + ")"
     )
-    pkg_mat_f = '=IF(M' + str(pkg_row) + '="","",M' + str(pkg_row) + "-M" + str(prod_row) + ")"
-    ratio_f = "=IF(M" + str(prod_row) + '=0,"",M' + str(pkg_mat_row) + "/M" + str(prod_row) + ")"
+    pkg_mat_f = '=IF(N' + str(pkg_row) + '="","",N' + str(pkg_row) + "-N" + str(prod_row) + ")"
+    ratio_f = "=IF(N" + str(prod_row) + '=0,"",N' + str(pkg_mat_row) + "/N" + str(prod_row) + ")"
 
     cost_data.append(["【運費計算】"])
     cost_data.append(["包裹總重(g)", "", ""])
@@ -254,18 +245,18 @@ def build_cost_table(sheet, price_map: dict, stats_row_count: int):
     # 總覽區
     total_start = fee_start + 7
     income_f = (
-        "=SUMPRODUCT((M" + str(start_row+1) + ":M" + str(start_row+item_count) +
-        '<>"")*M' + str(start_row+1) + ":M" + str(start_row+item_count) +
-        "*P" + str(start_row+1) + ":P" + str(start_row+item_count) + ")"
-    )
-    cost_f = (
         "=SUMPRODUCT((N" + str(start_row+1) + ":N" + str(start_row+item_count) +
         '<>"")*N' + str(start_row+1) + ":N" + str(start_row+item_count) +
-        "*P" + str(start_row+1) + ":P" + str(start_row+item_count) + ")"
+        "*Q" + str(start_row+1) + ":Q" + str(start_row+item_count) + ")"
+    )
+    cost_f = (
+        "=SUMPRODUCT((O" + str(start_row+1) + ":O" + str(start_row+item_count) +
+        '<>"")*O' + str(start_row+1) + ":O" + str(start_row+item_count) +
+        "*Q" + str(start_row+1) + ":Q" + str(start_row+item_count) + ")"
     )
     profit_f = (
-        "=IF(M" + str(total_start+1) + '="","",M' +
-        str(total_start) + "-M" + str(total_start+1) + ")"
+        "=IF(N" + str(total_start+1) + '="","",N' +
+        str(total_start) + "-N" + str(total_start+1) + ")"
     )
 
     cost_data.append(["【總覽】"])
@@ -273,7 +264,11 @@ def build_cost_table(sheet, price_map: dict, stats_row_count: int):
     cost_data.append(["總進貨成本", "", cost_f])
     cost_data.append(["淨利潤", "", profit_f])
 
-    sheet.update(values=cost_data, range_name="K" + str(start_row))
+    # 先清除 L 欄以後舊資料
+    empty = [[""] * 10] * 1000
+    sheet.update(values=empty, range_name="L1:U1000")
+    sheet.update(values=cost_data, range_name="L" + str(start_row), value_input_option="USER_ENTERED")
+
 
 def rebuild_sheet(cid: int, cname: str):
     sheet, is_new = get_sheet(cname)
@@ -420,11 +415,23 @@ def rebuild_sheet(cid: int, cname: str):
 
         data.extend(detail_rows)
 
-    sheet.update(values=data, range_name="A1")
+    sheet.update(values=data, range_name="A1", value_input_option="USER_ENTERED")
 
-    # 新建立的 sheet 才初始化成本表
-    if is_new and price_maps.get(cid):
-        build_cost_table(sheet, price_maps[cid], stats_row_count)
+    # 每次 rebuild 都重新生成成本表
+    if price_maps.get(cid):
+        # 建立實際商品列（含多人展開後的款式）
+        item_rows = []
+        for (n, s), p in price_maps[cid].items():
+            if s == "多人":
+                sub_styles = sorted({style for (name, style) in count if name == n})
+                if sub_styles:
+                    for style in sub_styles:
+                        item_rows.append((n, style, p))
+                else:
+                    item_rows.append((n, "多人", p))
+            else:
+                item_rows.append((n, s if s else "無", p))
+        build_cost_table(sheet, price_maps[cid], item_rows)
 
     save_data()
 

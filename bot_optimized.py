@@ -198,7 +198,7 @@ def get_sheet(name: str):
 def build_cost_table(sheet, price_map: dict, item_rows: list):
     """重新生成成本表（L欄起），item_rows 為實際商品列（含多人展開後的款式）"""
     item_count = len(item_rows)
-    start_row = 3  # 成本表從第3列開始（對齊統計表）
+    start_row = 3
     cost_data = []
 
     # 標題列
@@ -207,18 +207,18 @@ def build_cost_table(sheet, price_map: dict, item_rows: list):
     # 商品列
     for i, (n, s, p) in enumerate(item_rows):
         row_num = start_row + 1 + i
-        pipe = "CHAR(124)"
+        # VLOOKUP：比對商品+款式，引用左邊已訂購數量
         qty_f = (
-            "=IFERROR(VLOOKUP(L" + str(row_num) +
-            "&" + pipe + "&M" + str(row_num) +
-            ",ARRAYFORMULA(A$4:A$200&" + pipe + "&B$4:B$200),2,0),0)"
+            '=IFERROR(VLOOKUP(L' + str(row_num) +
+            '&"|"&M' + str(row_num) +
+            ',ARRAYFORMULA(A$4:A$200&"|"&B$4:B$200),2,0),0)'
         )
-        sub_f = "=IF(O" + str(row_num) + '="","",O' + str(row_num) + "*Q" + str(row_num) + ")"
+        sub_f = '=IF(O' + str(row_num) + '="","",O' + str(row_num) + '*Q' + str(row_num) + ')'
         cost_data.append([n, s, p, "", "", qty_f, sub_f])
 
     cost_data.append([])
 
-    # 運費計算區（緊接在商品區下方）
+    # 運費計算區
     fee_start = start_row + item_count + 2
     pkg_row = fee_start + 1
     price_row = fee_start + 2
@@ -227,12 +227,12 @@ def build_cost_table(sheet, price_map: dict, item_rows: list):
     ratio_row = fee_start + 5
 
     prod_w_f = (
-        "=SUMPRODUCT((P" + str(start_row+1) + ":P" + str(start_row+item_count) +
-        '<>"")*P' + str(start_row+1) + ":P" + str(start_row+item_count) +
-        "*Q" + str(start_row+1) + ":Q" + str(start_row+item_count) + ")"
+        '=SUMPRODUCT((P' + str(start_row+1) + ':P' + str(start_row+item_count) +
+        '<>"")*P' + str(start_row+1) + ':P' + str(start_row+item_count) +
+        '*Q' + str(start_row+1) + ':Q' + str(start_row+item_count) + ')'
     )
-    pkg_mat_f = '=IF(N' + str(pkg_row) + '="","",N' + str(pkg_row) + "-N" + str(prod_row) + ")"
-    ratio_f = "=IF(N" + str(prod_row) + '=0,"",N' + str(pkg_mat_row) + "/N" + str(prod_row) + ")"
+    pkg_mat_f = '=IF(N' + str(pkg_row) + '="","",N' + str(pkg_row) + '-N' + str(prod_row) + ')'
+    ratio_f = '=IF(N' + str(prod_row) + '=0,"",N' + str(pkg_mat_row) + '/N' + str(prod_row) + ')'
 
     cost_data.append(["【運費計算】"])
     cost_data.append(["包裹總重(g)", "", ""])
@@ -245,18 +245,18 @@ def build_cost_table(sheet, price_map: dict, item_rows: list):
     # 總覽區
     total_start = fee_start + 7
     income_f = (
-        "=SUMPRODUCT((N" + str(start_row+1) + ":N" + str(start_row+item_count) +
-        '<>"")*N' + str(start_row+1) + ":N" + str(start_row+item_count) +
-        "*Q" + str(start_row+1) + ":Q" + str(start_row+item_count) + ")"
+        '=SUMPRODUCT((N' + str(start_row+1) + ':N' + str(start_row+item_count) +
+        '<>"")*N' + str(start_row+1) + ':N' + str(start_row+item_count) +
+        '*Q' + str(start_row+1) + ':Q' + str(start_row+item_count) + ')'
     )
     cost_f = (
-        "=SUMPRODUCT((O" + str(start_row+1) + ":O" + str(start_row+item_count) +
-        '<>"")*O' + str(start_row+1) + ":O" + str(start_row+item_count) +
-        "*Q" + str(start_row+1) + ":Q" + str(start_row+item_count) + ")"
+        '=SUMPRODUCT((O' + str(start_row+1) + ':O' + str(start_row+item_count) +
+        '<>"")*O' + str(start_row+1) + ':O' + str(start_row+item_count) +
+        '*Q' + str(start_row+1) + ':Q' + str(start_row+item_count) + ')'
     )
     profit_f = (
-        "=IF(N" + str(total_start+1) + '="","",N' +
-        str(total_start) + "-N" + str(total_start+1) + ")"
+        '=IF(N' + str(total_start+1) + '="","",N' +
+        str(total_start) + '-N' + str(total_start+1) + ')'
     )
 
     cost_data.append(["【總覽】"])
@@ -264,7 +264,7 @@ def build_cost_table(sheet, price_map: dict, item_rows: list):
     cost_data.append(["總進貨成本", "", cost_f])
     cost_data.append(["淨利潤", "", profit_f])
 
-    # 先清除 L 欄以後舊資料
+    # 清除 L 欄以後舊資料再寫入
     empty = [[""] * 10] * 1000
     sheet.update(values=empty, range_name="L1:U1000")
     sheet.update(values=cost_data, range_name="L" + str(start_row), value_input_option="USER_ENTERED")

@@ -186,7 +186,9 @@ def get_sheet(name: str):
     try:
         sheet = spreadsheet.worksheet(name)
         # 只清除左邊 A~J 欄，保留 K 欄以後的成本表
-        sheet.batch_clear(["A1:J1000"])
+        # 用空值覆蓋的方式清除 A~J 欄
+        empty = [[""] * 10] * 1000
+        sheet.update(values=empty, range_name="A1:J1000")
         return sheet, False  # False = 已存在
     except gspread.exceptions.WorksheetNotFound:
         sheet = spreadsheet.add_worksheet(title=name, rows="1000", cols="30")

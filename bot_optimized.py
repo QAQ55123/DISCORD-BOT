@@ -211,7 +211,7 @@ def build_cost_table(sheet, price_map: dict, item_rows: list):
         qty_f = (
             '=IFERROR(VLOOKUP(L' + str(row_num) +
             '&"|"&M' + str(row_num) +
-            ',ARRAYFORMULA(A$4:A$200&"|"&B$4:B$200),2,0),0)'
+            ',ARRAYFORMULA({A$4:A$200&"|"&B$4:B$200,D$4:D$200}),2,0),0)'
         )
         sub_f = '=IF(O' + str(row_num) + '="","",O' + str(row_num) + '*Q' + str(row_num) + ')'
         cost_data.append([n, s, p, "", "", qty_f, sub_f])

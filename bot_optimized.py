@@ -197,7 +197,6 @@ def get_sheet(name: str):
 
 def build_cost_table(sheet, price_map: dict, stats_row_count: int):
     """第一次建立成本表框架（K欄起）"""
-    # 商品列表（排除多人，多人動態展開）
     items = []
     for (n, s), p in price_map.items():
         if s == "多人":
@@ -206,8 +205,7 @@ def build_cost_table(sheet, price_map: dict, stats_row_count: int):
             items.append((n, s if s else "無", p))
 
     item_count = len(items)
-    # 成本表起始列（對齊統計表，從第3列開始，即 row index 3）
-    start_row = 3
+    start_row = 3  # 成本表從第3列開始
     cost_data = []
 
     # 標題列
@@ -215,52 +213,67 @@ def build_cost_table(sheet, price_map: dict, stats_row_count: int):
 
     # 商品列
     for i, (n, s, p) in enumerate(items):
-        row_num = start_row + 1 + i  # sheet 實際列號（1-based）
-        # 數量引用左邊統計表的已訂購（D欄），需找對應列
-        # 用 MATCH 動態查找
-        qty_formula = f'=IFERROR(VLOOKUP(K{row_num}&L{row_num},ARRAYFORMULA(A$4:A$200&B$4:B$200,D$4:D$200,2,0),0)'
+        row_num = start_row + 1 + i
+        # 數量：用 VLOOKUP 比對商品+款式 引用左邊已訂購
+        pipe = "CHAR(124)"
+        qty_f = (
+            "=IFERROR(VLOOKUP(K" + str(row_num) +
+            "&" + pipe + "&L" + str(row_num) +
+            ",ARRAYFORMULA(A$4:A$200&" + pipe + "&B$4:B$200),2,0),0)"
+        )
         # 小計 = 進貨單價 × 數量
-        subtotal_formula = f"=IF(N{row_num}="","",N{row_num}*P{row_num})"
-        cost_data.append([n, s, p, "", "", f"=IFERROR(VLOOKUP(K{row_num}&"|"&L{row_num},ARRAYFORMULA(A$4:A$200&"|"&B$4:B$200&"|"&D$4:D$200),3,0),0)", subtotal_formula])
+        sub_f = "=IF(N" + str(row_num) + '="","",N' + str(row_num) + "*P" + str(row_num) + ")"
+        cost_data.append([n, s, p, "", "", qty_f, sub_f])
 
-    # 空行
     cost_data.append([])
 
     # 運費計算區
-    fee_start = start_row + item_count + 2  # 空行後
-    cost_data.append(["【運費計算】"])
-    cost_data.append(["包裹總重(g)", "", ""])
-    cost_data.append(["每公斤價格", "", ""])
-
-    pkg_row = fee_start + 1  # 包裹總重列號
-    price_row = fee_start + 2  # 每公斤價格列號
-    prod_row = fee_start + 3  # 商品總重列號
+    fee_start = start_row + item_count + 2
+    pkg_row = fee_start + 1
+    price_row = fee_start + 2
+    prod_row = fee_start + 3
     pkg_mat_row = fee_start + 4
     ratio_row = fee_start + 5
 
-    prod_weight_formula = f"=SUMPRODUCT((K{start_row+1}:K{start_row+item_count}<>"")*O{start_row+1}:O{start_row+item_count}*P{start_row+1}:P{start_row+item_count})"
-    pkg_mat_formula = f"=IF(M{pkg_row}="","",M{pkg_row}-M{prod_row})"
-    ratio_formula = f"=IF(M{prod_row}=0,"",M{pkg_mat_row}/M{prod_row})"
+    prod_w_f = (
+        "=SUMPRODUCT((O" + str(start_row+1) + ":O" + str(start_row+item_count) +
+        '<>"")*O' + str(start_row+1) + ":O" + str(start_row+item_count) +
+        "*P" + str(start_row+1) + ":P" + str(start_row+item_count) + ")"
+    )
+    pkg_mat_f = '=IF(M' + str(pkg_row) + '="","",M' + str(pkg_row) + "-M" + str(prod_row) + ")"
+    ratio_f = "=IF(M" + str(prod_row) + '=0,"",M' + str(pkg_mat_row) + "/M" + str(prod_row) + ")"
 
-    cost_data.append(["商品總重(g)", "", prod_weight_formula])
-    cost_data.append(["包材重量(g)", "", pkg_mat_formula])
-    cost_data.append(["每g分攤比例", "", ratio_formula])
+    cost_data.append(["【運費計算】"])
+    cost_data.append(["包裹總重(g)", "", ""])
+    cost_data.append(["每公斤價格", "", ""])
+    cost_data.append(["商品總重(g)", "", prod_w_f])
+    cost_data.append(["包材重量(g)", "", pkg_mat_f])
+    cost_data.append(["每g分攤比例", "", ratio_f])
     cost_data.append([])
 
     # 總覽區
     total_start = fee_start + 7
-    income_formula = f"=SUMPRODUCT((K{start_row+1}:K{start_row+item_count}<>"")*M{start_row+1}:M{start_row+item_count}*P{start_row+1}:P{start_row+item_count})"
-    cost_formula = f"=SUMPRODUCT((N{start_row+1}:N{start_row+item_count}<>"")*N{start_row+1}:N{start_row+item_count}*P{start_row+1}:P{start_row+item_count})"
-    profit_formula = f"=IF(M{total_start+1}="","",M{total_start}-M{total_start+1})"
+    income_f = (
+        "=SUMPRODUCT((M" + str(start_row+1) + ":M" + str(start_row+item_count) +
+        '<>"")*M' + str(start_row+1) + ":M" + str(start_row+item_count) +
+        "*P" + str(start_row+1) + ":P" + str(start_row+item_count) + ")"
+    )
+    cost_f = (
+        "=SUMPRODUCT((N" + str(start_row+1) + ":N" + str(start_row+item_count) +
+        '<>"")*N' + str(start_row+1) + ":N" + str(start_row+item_count) +
+        "*P" + str(start_row+1) + ":P" + str(start_row+item_count) + ")"
+    )
+    profit_f = (
+        "=IF(M" + str(total_start+1) + '="","",M' +
+        str(total_start) + "-M" + str(total_start+1) + ")"
+    )
 
     cost_data.append(["【總覽】"])
-    cost_data.append(["總收入", "", income_formula])
-    cost_data.append(["總進貨成本", "", cost_formula])
-    cost_data.append(["淨利潤", "", profit_formula])
+    cost_data.append(["總收入", "", income_f])
+    cost_data.append(["總進貨成本", "", cost_f])
+    cost_data.append(["淨利潤", "", profit_f])
 
-    # 寫入 K 欄起
-    sheet.update(values=cost_data, range_name=f"K{start_row}")
-
+    sheet.update(values=cost_data, range_name="K" + str(start_row))
 
 def rebuild_sheet(cid: int, cname: str):
     sheet, is_new = get_sheet(cname)

@@ -185,14 +185,83 @@ def get_sheet(name: str):
     spreadsheet = get_spreadsheet()
     try:
         sheet = spreadsheet.worksheet(name)
-        sheet.clear()
+        # 只清除左邊 A~J 欄，保留 K 欄以後的成本表
+        sheet.batch_clear(["A:J"])
+        return sheet, False  # False = 已存在
     except gspread.exceptions.WorksheetNotFound:
-        sheet = spreadsheet.add_worksheet(title=name, rows="1000", cols="20")
-    return sheet
+        sheet = spreadsheet.add_worksheet(title=name, rows="1000", cols="30")
+        return sheet, True  # True = 新建立
+
+
+def build_cost_table(sheet, price_map: dict, stats_row_count: int):
+    """第一次建立成本表框架（K欄起）"""
+    # 商品列表（排除多人，多人動態展開）
+    items = []
+    for (n, s), p in price_map.items():
+        if s == "多人":
+            items.append((n, "多人", p))
+        else:
+            items.append((n, s if s else "無", p))
+
+    item_count = len(items)
+    # 成本表起始列（對齊統計表，從第3列開始，即 row index 3）
+    start_row = 3
+    cost_data = []
+
+    # 標題列
+    cost_data.append(["商品", "款式", "售價", "進貨單價", "單件重量(g)", "數量", "小計"])
+
+    # 商品列
+    for i, (n, s, p) in enumerate(items):
+        row_num = start_row + 1 + i  # sheet 實際列號（1-based）
+        # 數量引用左邊統計表的已訂購（D欄），需找對應列
+        # 用 MATCH 動態查找
+        qty_formula = f'=IFERROR(VLOOKUP(K{row_num}&L{row_num},ARRAYFORMULA(A$4:A$200&B$4:B$200,D$4:D$200,2,0),0)'
+        # 小計 = 進貨單價 × 數量
+        subtotal_formula = f"=IF(N{row_num}="","",N{row_num}*P{row_num})"
+        cost_data.append([n, s, p, "", "", f"=IFERROR(VLOOKUP(K{row_num}&"|"&L{row_num},ARRAYFORMULA(A$4:A$200&"|"&B$4:B$200&"|"&D$4:D$200),3,0),0)", subtotal_formula])
+
+    # 空行
+    cost_data.append([])
+
+    # 運費計算區
+    fee_start = start_row + item_count + 2  # 空行後
+    cost_data.append(["【運費計算】"])
+    cost_data.append(["包裹總重(g)", "", ""])
+    cost_data.append(["每公斤價格", "", ""])
+
+    pkg_row = fee_start + 1  # 包裹總重列號
+    price_row = fee_start + 2  # 每公斤價格列號
+    prod_row = fee_start + 3  # 商品總重列號
+    pkg_mat_row = fee_start + 4
+    ratio_row = fee_start + 5
+
+    prod_weight_formula = f"=SUMPRODUCT((K{start_row+1}:K{start_row+item_count}<>"")*O{start_row+1}:O{start_row+item_count}*P{start_row+1}:P{start_row+item_count})"
+    pkg_mat_formula = f"=IF(M{pkg_row}="","",M{pkg_row}-M{prod_row})"
+    ratio_formula = f"=IF(M{prod_row}=0,"",M{pkg_mat_row}/M{prod_row})"
+
+    cost_data.append(["商品總重(g)", "", prod_weight_formula])
+    cost_data.append(["包材重量(g)", "", pkg_mat_formula])
+    cost_data.append(["每g分攤比例", "", ratio_formula])
+    cost_data.append([])
+
+    # 總覽區
+    total_start = fee_start + 7
+    income_formula = f"=SUMPRODUCT((K{start_row+1}:K{start_row+item_count}<>"")*M{start_row+1}:M{start_row+item_count}*P{start_row+1}:P{start_row+item_count})"
+    cost_formula = f"=SUMPRODUCT((N{start_row+1}:N{start_row+item_count}<>"")*N{start_row+1}:N{start_row+item_count}*P{start_row+1}:P{start_row+item_count})"
+    profit_formula = f"=IF(M{total_start+1}="","",M{total_start}-M{total_start+1})"
+
+    cost_data.append(["【總覽】"])
+    cost_data.append(["總收入", "", income_formula])
+    cost_data.append(["總進貨成本", "", cost_formula])
+    cost_data.append(["淨利潤", "", profit_formula])
+
+    # 寫入 K 欄起
+    sheet.update(values=cost_data, range_name=f"K{start_row}")
 
 
 def rebuild_sheet(cid: int, cname: str):
-    sheet = get_sheet(cname)
+    sheet, is_new = get_sheet(cname)
     data = []
 
     # 價格表時間
@@ -227,6 +296,7 @@ def rebuild_sheet(cid: int, cname: str):
             lookup_key = (n, str(s if s else "無").strip())
             qty = count.get(lookup_key, 0)
             data.append([n, s if s else "無", p, qty])
+    stats_row_count = len(data)
     data.append([])
 
     # 訂單明細
@@ -250,16 +320,97 @@ def rebuild_sheet(cid: int, cname: str):
             display_id += 1
         r["編號"] = msg_map[mid]
 
+    # 計算每個使用者的總金額和總運費
+    # 先按訊息ID分組
+    user_totals = {}  # {訊息ID: {總金額, 總運費}}
+    price_map = price_maps.get(cid, {})
+    ratio_cell = None  # 每g分攤比例的位置（由成本表動態計算）
+
+    for r in rows:
+        status = str(r.get("狀態", ""))
+        if "錯誤" in status or status == "資料遭刪除":
+            continue
+        mid = r.get("訊息ID")
+        qty = r.get("商品數量", 0)
+        price = r.get("單價", 0)
+        if mid not in user_totals:
+            user_totals[mid] = {"總金額": 0, "總運費公式": []}
+        user_totals[mid]["總金額"] += qty * price
+
     df = pd.DataFrame(rows)
     if not df.empty:
         df = df.fillna("")
         df = df.drop(columns=["訂單編號", "訊息ID"], errors="ignore")
         cols = ["編號"] + [c for c in df.columns if c != "編號"]
         df = df[[c for c in cols if c in df.columns]]
+        # 新增總金額和總運費欄位
+        if "總金額" not in df.columns:
+            df["總金額"] = ""
+        if "總運費" not in df.columns:
+            df["總運費"] = ""
         data.append(df.columns.tolist())
-        data.extend(df.values.tolist())
+        detail_rows = df.values.tolist()
 
-    sheet.update(values=data)
+        # 找每個使用者最後一行，填入總金額和總運費公式
+        # 收集每個訊息ID對應的列號
+        mid_last_row = {}
+        for i, r in enumerate(rows):
+            status = str(r.get("狀態", ""))
+            if "錯誤" in status or status == "資料遭刪除":
+                continue
+            mid = r.get("訊息ID")
+            mid_last_row[mid] = i
+
+        # 計算 header 在 sheet 中的實際列號
+        header_sheet_row = len(data)  # data 目前長度就是 header 列號（1-based）
+
+        for mid, last_idx in mid_last_row.items():
+            total_amount = user_totals.get(mid, {}).get("總金額", 0)
+            detail_rows[last_idx][-2] = total_amount  # 總金額
+
+            # 總運費：找該使用者的所有商品行，計算運費公式
+            # 需要引用成本表的重量和分攤比例
+            # 先計算每g分攤比例的 sheet 列號
+            item_count = sum(1 for (n,s) in price_map.keys())
+            fee_start = 3 + item_count + 2
+            ratio_row = fee_start + 5
+            price_row = fee_start + 2
+
+            # 找該使用者的所有行
+            user_rows_idx = [i for i, r in enumerate(rows)
+                           if r.get("訊息ID") == mid and
+                           "錯誤" not in str(r.get("狀態","")) and
+                           r.get("狀態") != "資料遭刪除"]
+
+            # 建立運費公式：Σ(單件重量×(1+分攤比例)/1000×每公斤價格×數量)
+            fee_parts = []
+            for idx in user_rows_idx:
+                r = rows[idx]
+                item_name = r.get("商品", "")
+                item_style = r.get("款式", "無")
+                qty = r.get("商品數量", 0)
+                # 在成本表找對應的單件重量
+                item_row_in_cost = None
+                for j, (n, s) in enumerate(price_map.keys()):
+                    s_display = s if s else "無"
+                    if n == item_name and s_display == item_style:
+                        item_row_in_cost = 3 + 1 + j  # K欄起始列 + 標題 + index
+                        break
+                if item_row_in_cost:
+                    # 單件重量在 O 欄
+                    fee_parts.append(f"O{item_row_in_cost}*(1+M{ratio_row})/1000*M{price_row}*{qty}")
+
+            if fee_parts:
+                detail_rows[last_idx][-1] = "=" + "+".join(fee_parts)
+
+        data.extend(detail_rows)
+
+    sheet.update(values=data, range_name="A1")
+
+    # 新建立的 sheet 才初始化成本表
+    if is_new and price_maps.get(cid):
+        build_cost_table(sheet, price_maps[cid], stats_row_count)
+
     save_data()
 
 

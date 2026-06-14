@@ -256,7 +256,7 @@ def build_cost_table(sheet, price_map: dict, item_rows: list):
     )
     profit_f = (
         '=IF(N' + str(total_start+1) + '="","",N' +
-        str(total_start) + '-N' + str(total_start+1) + ')'
+        str(total_start+1) + '-N' + str(total_start+2) + ')'
     )
 
     cost_data.append(["【總覽】"])
@@ -330,22 +330,7 @@ def rebuild_sheet(cid: int, cname: str):
             display_id += 1
         r["編號"] = msg_map[mid]
 
-    # 計算每個使用者的總金額和總運費
-    # 先按訊息ID分組
-    user_totals = {}  # {訊息ID: {總金額, 總運費}}
     price_map = price_maps.get(cid, {})
-    ratio_cell = None  # 每g分攤比例的位置（由成本表動態計算）
-
-    for r in rows:
-        status = str(r.get("狀態", ""))
-        if "錯誤" in status or status == "資料遭刪除":
-            continue
-        mid = r.get("訊息ID")
-        qty = r.get("商品數量", 0)
-        price = r.get("單價", 0)
-        if mid not in user_totals:
-            user_totals[mid] = {"總金額": 0, "總運費公式": []}
-        user_totals[mid]["總金額"] += qty * price
 
     df = pd.DataFrame(rows)
     if not df.empty:
@@ -361,8 +346,13 @@ def rebuild_sheet(cid: int, cname: str):
         data.append(df.columns.tolist())
         detail_rows = df.values.tolist()
 
-        # 找每個使用者最後一行，填入總金額和總運費公式
-        # 收集每個訊息ID對應的列號
+        # header 在 sheet 中的實際列號（1-based）
+        header_sheet_row = len(data)
+        # 訂單明細第一筆資料的列號
+        data_start_row = header_sheet_row + 1
+
+        # H欄=名稱, E欄=商品數量, F欄=單價
+        # 找每個訊息ID的最後一行 index
         mid_last_row = {}
         for i, r in enumerate(rows):
             status = str(r.get("狀態", ""))
@@ -371,46 +361,53 @@ def rebuild_sheet(cid: int, cname: str):
             mid = r.get("訊息ID")
             mid_last_row[mid] = i
 
-        # 計算 header 在 sheet 中的實際列號
-        header_sheet_row = len(data)  # data 目前長度就是 header 列號（1-based）
+        # 計算成本表運費相關列號
+        item_count = len(price_map)
+        fee_start = 3 + item_count + 2
+        ratio_row = fee_start + 5
+        price_row = fee_start + 2
 
         for mid, last_idx in mid_last_row.items():
-            total_amount = user_totals.get(mid, {}).get("總金額", 0)
-            detail_rows[last_idx][-2] = total_amount  # 總金額
+            # 該行在 sheet 中的實際列號
+            sheet_row = data_start_row + last_idx
 
-            # 總運費：找該使用者的所有商品行，計算運費公式
-            # 需要引用成本表的重量和分攤比例
-            # 先計算每g分攤比例的 sheet 列號
-            item_count = sum(1 for (n,s) in price_map.keys())
-            fee_start = 3 + item_count + 2
-            ratio_row = fee_start + 5
-            price_row = fee_start + 2
+            # 總金額：用 SUMPRODUCT 依名稱加總（排除錯誤和刪除行）
+            h_col = "H"
+            amount_f = (
+                "=SUMPRODUCT((" + h_col + str(data_start_row) + ":" + h_col + "9999=" +
+                h_col + str(sheet_row) + ")*" +
+                "(ISNUMBER(SEARCH(\"錯誤\",G" + str(data_start_row) + ":G9999))=FALSE)*" +
+                "(G" + str(data_start_row) + ":G9999<>\"資料遭刪除\")*" +
+                "E" + str(data_start_row) + ":E9999*" +
+                "F" + str(data_start_row) + ":F9999)"
+            )
+            detail_rows[last_idx][-2] = amount_f
 
-            # 找該使用者的所有行
+            # 總運費：依名稱找所有行，各自計算運費後加總
             user_rows_idx = [i for i, r in enumerate(rows)
                            if r.get("訊息ID") == mid and
                            "錯誤" not in str(r.get("狀態","")) and
                            r.get("狀態") != "資料遭刪除"]
 
-            # 建立運費公式：Σ(單件重量×(1+分攤比例)/1000×每公斤價格×數量)
-            # 成本表從 L 欄起，L=商品, M=款式, N=售價, O=進貨單價, P=單件重量, Q=數量, R=小計
-            # 運費計算區：N欄為包裹總重/每公斤價格/商品總重/包材重量/分攤比例
             fee_parts = []
             for idx in user_rows_idx:
                 r = rows[idx]
                 item_name = r.get("商品", "")
                 item_style = r.get("款式", "無")
                 qty = r.get("商品數量", 0)
-                # 在成本表找對應的單件重量（P欄）
                 item_row_in_cost = None
                 for j, (n, s) in enumerate(price_map.keys()):
                     s_display = s if s else "無"
                     if n == item_name and s_display == item_style:
-                        item_row_in_cost = 3 + 1 + j  # 成本表第3列為標題，商品從第4列開始
+                        item_row_in_cost = 3 + 1 + j
                         break
                 if item_row_in_cost:
-                    # P欄=單件重量, N{ratio_row}=每g分攤比例, N{price_row}=每公斤價格
-                    fee_parts.append(f"P{item_row_in_cost}*(1+N{ratio_row})/1000*N{price_row}*{qty}")
+                    fee_parts.append(
+                        "P" + str(item_row_in_cost) +
+                        "*(1+N" + str(ratio_row) + ")/1000" +
+                        "*N" + str(price_row) +
+                        "*" + str(qty)
+                    )
 
             if fee_parts:
                 detail_rows[last_idx][-1] = "=" + "+".join(fee_parts)

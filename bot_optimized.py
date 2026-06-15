@@ -630,9 +630,9 @@ def process_order_content(message_id, author, content: str, cid: int,
 
         row = make_row(order_id, message_id, author, name, style, qty, price, status, extra)
 
-        # 保留特殊舊狀態
+        # 保留特殊舊狀態（只保留「資料遭刪除」，不保留「✏ 已編輯」，避免覆蓋新的錯誤狀態）
         key = (row.get("商品"), row.get("款式"))
-        if key in old_status_map and old_status_map[key] in {"✏ 已編輯", "資料遭刪除"}:
+        if key in old_status_map and old_status_map[key] == "資料遭刪除":
             row["狀態"] = old_status_map[key]
 
         rows.append(row)

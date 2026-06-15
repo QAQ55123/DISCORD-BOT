@@ -890,14 +890,16 @@ async def on_message_edit(before, after):
             notice = await after.channel.send(msg_text)
             error_notices[after.id] = notice
     else:
-        # 全部正確，刪除提醒訊息並發喊單成功
+        # 全部正確
         if after.id in error_notices:
+            # 之前有錯誤提醒，現在改對了 → 刪除提醒並發喊單成功
             try:
                 await error_notices[after.id].delete()
             except Exception:
                 pass
             del error_notices[after.id]
-        await send_success_and_delete(after.channel, after.author)
+            await send_success_and_delete(after.channel, after.author)
+        # 若之前沒有錯誤提醒（純編輯），不發喊單成功
 
 
 @client.event

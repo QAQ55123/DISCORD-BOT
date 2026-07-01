@@ -1,4 +1,4 @@
 .env
 *.json
 data.json
-__pycache__/
+__pycache__/帳號密碼.txt

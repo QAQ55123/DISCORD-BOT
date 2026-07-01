@@ -6,7 +6,11 @@
   1) 使用者在網頁下單 → 取得 6 位數「訂單編號」。
   2) 使用者到 Discord 頻道貼出訂單編號。
   3) Bot 去米舖試算表確認這個編號「真的存在」：
+<<<<<<< HEAD
        - 存在  → 回覆「喊單成功！」，該回覆 30 分鐘後自動刪除。
+=======
+       - 存在  → 回覆「喊單成功！」，該回覆 1 小時後自動刪除。
+>>>>>>> 84c32020be38ab4a049801778cd3b736bf03cd4a
        - 不存在 → 回覆提示，同樣 1 小時後自動刪除。
   4) 用訂單編號找到那筆訂單所屬「會員」，把發文者的
      Discord「使用者ID＋帳號名稱(username)」補寫到會員資料
@@ -44,7 +48,12 @@ SHEET_ID  = os.getenv("SHEET_ID")
 ALLOWED_CATEGORIES = {int(i.strip()) for i in os.getenv("ALLOWED_CATEGORIES", "").split(",") if i.strip()}
 ALLOWED_CHANNEL_IDS = {int(i.strip()) for i in os.getenv("ALLOWED_CHANNEL_IDS", "").split(",") if i.strip()}
 
+<<<<<<< HEAD
 SUCCESS_DELETE_DELAY = 1800  # 「喊單成功」訊息幾秒後自動刪除（1800 = 30 分鐘）；找不到/打錯的不刪
+=======
+DELETE_DELAY = 3600          # 回覆訊息幾秒後刪除（3600 = 1 小時）
+DELETE_USER_MESSAGE = False  # 若也想在 1 小時後刪掉「使用者貼的訂單編號訊息」，改成 True
+>>>>>>> 84c32020be38ab4a049801778cd3b736bf03cd4a
 
 # 米舖試算表的系統分頁（不是企劃分頁，掃訂單時要跳過）
 SYSTEM_SHEETS = {"企劃清單", "會員資料", "設定", "疑似重複"}
@@ -137,20 +146,33 @@ def find_order(order_no: str):
     return info
 
 
+<<<<<<< HEAD
 def check_and_link(order_info: dict, user_id: int, username: str) -> str:
     """找到訂單所屬會員，檢查擁有者並寫入 DC 帳號。
     回傳：'ok'（是本人/首次綁定，已寫入）、'wrong_owner'（這訂單已綁別的 DC 帳號）、
           'no_member'（對不到會員，無法驗證，當作成功但不寫入）。"""
+=======
+def link_dc_to_member(order_info: dict, user_id: int, username: str) -> bool:
+    """用訂單資訊找到會員，把 DC 帳號名稱/ID 寫到會員資料 E、F 欄。"""
+>>>>>>> 84c32020be38ab4a049801778cd3b736bf03cd4a
     ss = get_spreadsheet()
     try:
         ws = ss.worksheet(MEMBER_SHEET_NAME)
     except gspread.exceptions.WorksheetNotFound:
         print("找不到『會員資料』分頁")
+<<<<<<< HEAD
         return "no_member"
 
     values = ws.get_all_values()
     if not values:
         return "no_member"
+=======
+        return False
+
+    values = ws.get_all_values()
+    if not values:
+        return False
+>>>>>>> 84c32020be38ab4a049801778cd3b736bf03cd4a
 
     # 確保表頭有 DC 欄（E=第5欄 帳號名稱、F=第6欄 使用者ID）
     header = values[0] if values else []
@@ -181,6 +203,7 @@ def check_and_link(order_info: dict, user_id: int, username: str) -> str:
 
     if row_idx < 0:
         print(f"訂單 {order_info} 對不到會員，略過寫入")
+<<<<<<< HEAD
         return "no_member"
 
     # 這位會員先前綁過的 DC 使用者ID（F欄，去掉前面的 '）
@@ -190,12 +213,19 @@ def check_and_link(order_info: dict, user_id: int, username: str) -> str:
     if existing and existing != str(user_id):
         print(f"訂單屬於 DC {existing}，但貼的人是 {user_id} → 喊錯")
         return "wrong_owner"
+=======
+        return False
+>>>>>>> 84c32020be38ab4a049801778cd3b736bf03cd4a
 
     # 寫入 E、F；ID 前面加 ' 讓試算表當文字存（避免 19 位數字被轉成科學記號失真）
     ws.update_cell(row_idx, 5, username)
     ws.update_cell(row_idx, 6, "'" + str(user_id))
     print(f"已把 DC 帳號 {username}({user_id}) 寫到會員第 {row_idx} 列")
+<<<<<<< HEAD
     return "ok"
+=======
+    return True
+>>>>>>> 84c32020be38ab4a049801778cd3b736bf03cd4a
 
 
 # ========== Discord ==========
@@ -220,6 +250,7 @@ async def run_blocking(fn, *args):
     return await asyncio.get_event_loop().run_in_executor(None, fn, *args)
 
 
+<<<<<<< HEAD
 # 記住每一則使用者訊息對應的 bot 回覆，之後使用者編輯訊息時就「改同一則回覆」
 claim_replies = {}  # {使用者訊息id: bot 回覆 Message}
 
@@ -295,6 +326,30 @@ async def handle_claim(message):
     else:
         reply = await upsert_reply(message, f"{mention} 喊單成功！（訂單編號 {cand}）")
         await schedule_delete(reply, message.id)  # 成功訊息 30 分鐘後自動刪除
+=======
+async def send_and_delete(channel, text: str, delay: int = DELETE_DELAY):
+    msg = await channel.send(text)
+
+    async def _del():
+        try:
+            await asyncio.sleep(delay)
+            await msg.delete()
+        except Exception:
+            pass
+
+    asyncio.create_task(_del())
+    return msg
+
+
+async def delete_later(message, delay: int = DELETE_DELAY):
+    async def _del():
+        try:
+            await asyncio.sleep(delay)
+            await message.delete()
+        except Exception:
+            pass
+    asyncio.create_task(_del())
+>>>>>>> 84c32020be38ab4a049801778cd3b736bf03cd4a
 
 
 @client.event
@@ -313,6 +368,7 @@ async def on_ready():
 
 @client.event
 async def on_message(message):
+<<<<<<< HEAD
     await handle_claim(message)
 
 
@@ -320,6 +376,42 @@ async def on_message(message):
 async def on_message_edit(before, after):
     # 使用者編輯訊息（例如把打錯的編號改對）→ 重新驗證並更新同一則 bot 回覆
     await handle_claim(after)
+=======
+    if message.author.bot or not is_watched_channel(message.channel):
+        return
+
+    content = message.content or ""
+    candidates = ORDER_NO_REGEX.findall(content)
+    if not candidates:
+        return  # 沒有數字，當一般聊天，不回應
+
+    # 逐一驗證，找到第一個「真的存在」的訂單編號
+    matched = None
+    for cand in candidates:
+        info = await run_blocking(find_order, cand)
+        if info:
+            matched = (cand, info)
+            break
+
+    if not matched:
+        await send_and_delete(message.channel,
+                              f"{message.author.mention} 找不到這個訂單編號，請確認後再貼一次。")
+        return
+
+    cand, info = matched
+
+    # 記錄 DC 帳號到會員資料（失敗不影響喊單成功回覆）
+    try:
+        await run_blocking(link_dc_to_member, info, message.author.id, message.author.name)
+    except Exception as e:
+        print(f"寫入會員資料失敗：{e}")
+
+    await send_and_delete(message.channel,
+                          f"{message.author.mention} 喊單成功！（訂單編號 {cand}）")
+
+    if DELETE_USER_MESSAGE:
+        await delete_later(message)
+>>>>>>> 84c32020be38ab4a049801778cd3b736bf03cd4a
 
 
 if __name__ == "__main__":

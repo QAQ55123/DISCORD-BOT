@@ -1,24 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-米舖 喊單 Bot（網頁下單版 v2 — 改接新網站 API，不再直接碰 Google Sheet）
+米舖 喊單 Bot（網頁下單版 v2.1 — 訂單編號偵測規則改嚴格，避免價目表誤觸發）
 ------------------------------------------------------------
-跟原本版本的差異：
-  - 原本 Bot 會自己掃描 Google 試算表建立訂單索引、直接把 DC 帳號寫進「會員資料」分頁；
-    這支改成呼叫新網站提供的兩支 API：
-      GET  /api/bot/order-status?orderNo=xxx   查訂單編號存不存在
-      POST /api/bot/link-discord               把 DC 帳號記錄到訂單所屬的會員（寫進資料庫）
-  - 好處：資料庫是唯一真實來源，不會被網站之後的「立即完整同步一次」洗掉；
-    也不用再每 15 秒掃一次所有 Google Sheet 分頁，改成直接查資料庫，比較快也比較穩。
-  - 已經不需要 gspread / oauth2client / SHEET_ID / GOOGLE_JSON_FILE 這些設定了。
+跟 v2 的差異：
+  - 訂單編號現在統一是 9 碼（不足會前面補0），所以把偵測規則從「4~10位數字都當候選」
+    改成「剛好 9 位數字、前後都不能緊接其他數字」，價目表裡常見的 2~4 位數價錢、
+    商品編號就不會再被誤判成訂單編號、觸發「找不到此訂單編號」的誤報。
 
-流程（跟原本一樣）：
-  1) 使用者在網頁下單 → 取得訂單編號。
-  2) 使用者到 Discord 頻道貼出訂單編號。
-  3) Bot 呼叫網站 API 確認這個編號「真的存在」：
-       - 存在  → 回覆「喊單成功！」，該回覆 30 分鐘後自動刪除。
-       - 不存在 → 回覆提示，不會自動刪除（等使用者編輯訊息改成正確編號）。
-  4) 存在的話，再呼叫網站 API 把發文者的 Discord「使用者ID＋帳號名稱」記錄到
-     這筆訂單所屬的會員資料（資料庫），並回報是「本人」還是「喊到別人的訂單」。
+其餘邏輯跟 v2 完全一樣：呼叫網站 API 驗證訂單、記錄 Discord 帳號，不直接碰 Google Sheet。
 
 需要安裝：
   pip install discord.py aiohttp python-dotenv
@@ -27,9 +16,8 @@
   DISCORD_TOKEN=你的機器人Token
   MIBU_API_BASE=https://你的網站網址              # 例如 https://minipu.vercel.app
   BOT_API_SECRET=跟 Vercel 後台環境變數同一組密碼
-  # 下面兩個擇一或都填；都留空＝所有頻道都監聽
-  ALLOWED_CATEGORIES=123456789012345678          # 監聽這些「分類」底下的所有文字頻道（逗號分隔，選填）
-  ALLOWED_CHANNEL_IDS=987654321098765432         # 直接指定要監聽的頻道（逗號分隔，選填）
+  ALLOWED_CATEGORIES=123456789012345678          # 選填
+  ALLOWED_CHANNEL_IDS=987654321098765432         # 選填
 """
 
 import os
@@ -52,8 +40,9 @@ ALLOWED_CHANNEL_IDS = {int(i.strip()) for i in os.getenv("ALLOWED_CHANNEL_IDS", 
 
 SUCCESS_DELETE_DELAY = 1800  # 「喊單成功」訊息幾秒後自動刪除（1800 = 30 分鐘）；找不到/打錯的不刪
 
-# 訂單編號長度（抓 4~10 位數字當候選，再用 API 驗證是不是真的存在）
-ORDER_NO_REGEX = re.compile(r"\d{4,10}")
+# 訂單編號現在統一是 9 碼數字（不足會前面補0）；用前後零寬斷言確保「剛好 9 碼」，
+# 不會抓到價目表裡常見的 2~4 位數價錢、商品編號，也不會從更長的數字串裡誤截出剛好9碼的片段
+ORDER_NO_REGEX = re.compile(r"(?<!\d)\d{9}(?!\d)")
 
 
 # ========== 呼叫網站 API ==========
@@ -148,7 +137,7 @@ async def handle_claim(message):
     content = message.content or ""
     candidates = ORDER_NO_REGEX.findall(content)
     if not candidates:
-        return  # 沒有數字，當一般聊天，不回應
+        return  # 沒有符合「剛好9碼」的數字，當一般聊天，不回應
 
     # 逐一驗證，找到第一個「真的存在」的訂單編號
     matched = None
